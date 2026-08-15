@@ -1,0 +1,5 @@
+# Unity build output
+Flappy Brain/
+*.exe
+*.dll
+*_Data/
