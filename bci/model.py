@@ -23,7 +23,14 @@ DEFAULT_MODEL_PATH = Path(__file__).parent.parent / "model.pkl"
 
 @dataclass
 class TrainedModel:
-    """A fitted pipeline plus everything needed to reproduce its input."""
+    """A fitted pipeline plus everything needed to reproduce its input.
+
+    `feature_mode` decides what the live loop must hand the pipeline:
+      "bandpower" -- a feature vector from bci.features.log_band_power
+      "riemann"   -- the raw epoch, because bci.riemann.riemann_svm does its
+                     own filtering, covariance and tangent space projection
+                     inside the pipeline
+    """
 
     pipeline: object
     classes: list[str]
@@ -32,6 +39,7 @@ class TrainedModel:
     n_channels: int
     channels: list[str] = field(default_factory=list)
     notes: str = ""
+    feature_mode: str = "bandpower"
 
     def save(self, path: str | Path = DEFAULT_MODEL_PATH) -> Path:
         path = Path(path)
@@ -65,7 +73,8 @@ def default_classifier():
 
 def train(X: np.ndarray, y: np.ndarray, fs: float, window_s: float,
           n_channels: int, channels: list[str] | None = None,
-          clf=None, notes: str = "") -> TrainedModel:
+          clf=None, notes: str = "",
+          feature_mode: str = "bandpower") -> TrainedModel:
     clf = clf or default_classifier()
     clf.fit(X, y)
     return TrainedModel(
@@ -76,4 +85,5 @@ def train(X: np.ndarray, y: np.ndarray, fs: float, window_s: float,
         n_channels=n_channels,
         channels=channels or [],
         notes=notes,
+        feature_mode=feature_mode,
     )

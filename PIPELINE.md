@@ -22,13 +22,15 @@ only the data is missing.
 | --- | --- |
 | `bci/data.py` | Loads the FlexEEG CSV exports, resamples to a uniform grid, drops dead/artifact channels |
 | `bci/features.py` | Notch + band-pass + common-average reference, epoching, log band power |
+| `bci/riemann.py` | Covariance → Riemannian tangent space features, + SVM-RBF pipeline |
 | `bci/model.py` | Trains, saves and loads the live classifier |
 | `train_offline.py` | Compares classifiers under two validation schemes; `--save` writes `model.pkl` |
+| `compare_riemann.py` | Tangent-space dimensionality, and whether reduction helps |
 | `diagnose_confound.py` | Demonstrates the session confound in the supplied data |
 | `record_calibration.py` | Cued recorder — **run this first on the day** |
 | `realtime_classifier.py` | LSL in → flap out over LSL or UDP |
 
-## Which classifier
+## Which classifier (band-power baseline)
 
 **Shrinkage LDA**, matching the recommendation in `pipeline-layout.ipynb`.
 `train_offline.py` scores all four candidates from that notebook, so this is
@@ -47,7 +49,120 @@ LDA wins for the reason `pipeline-layout.ipynb` gives: with ~30 features and
 higher-capacity models (SVM, RF) score **below chance** on held-out recordings
 while looking fine under random k-fold — a textbook overfitting signature.
 
-### Why two columns
+## Riemannian tangent space + SVM-RBF
+
+`bci/riemann.py`, compared by `compare_riemann.py`.
+
+### What goes into the SVM
+
+Not raw EEG, and not band power — **tangent-space vectors derived from spatial
+covariance matrices**:
+
+```
+epoch                    6 channels x 250 samples  = 1500 numbers
+  -> covariance          6 x 6 SPD matrix
+  -> tangent space       21 features   ( = n(n+1)/2 )
+  -> StandardScaler -> SVC(kernel="rbf")
+```
+
+The covariance matrix *is* the feature. Motor imagery modulates mu/beta power
+in sensorimotor cortex, which changes both the variance of individual channels
+and the correlation between them; covariance captures both, and unlike
+per-channel band power it keeps the cross-channel terms where C3/C4
+lateralisation lives.
+
+Covariance matrices are symmetric positive definite, so they lie on a curved
+manifold. Feeding them to an SVM directly is a category error — the
+straight-line distance between two SPD matrices isn't the meaningful distance.
+The tangent space projection flattens the manifold locally around the
+Riemannian mean of the *training* covariances, after which Euclidean
+classifiers apply. **That mean is a fitted parameter**: fit it on the training
+fold only, or you leak across the split.
+
+### Does it need dimensionality reduction?
+
+**No.** The covariance → tangent space step already *is* the dimensionality
+reduction: 1500 numbers down to 21. Reducing 21 further is not the problem you
+have. Measured on hands vs legs:
+
+| pipeline | random 5-fold | leave-one-recording-out |
+| --- | --- | --- |
+| Riemann TS + SVM-RBF (21f, no reduction) | 70.7% | 42.8% |
+| + PCA(10) | 73.3% | 46.4% |
+| + PCA(5) | 70.7% | 49.4% |
+| + SelectKBest(10) | 70.7% | 43.1% |
+| Riemann TS + LDA (no SVM) | 70.7% | 45.4% |
+| **Filter bank** TS + SVM-RBF (84f) | **84.0%** | **41.1%** |
+| Filter bank + PCA(15) | 82.7% | 40.3% |
+| *chance* | *56.0%* | *56.0%* |
+
+PCA moves the honest column by a few points and everything stays below chance.
+It costs 21 → 12 components to keep 90% of the variance, so there isn't much
+redundancy to squeeze out.
+
+Where reduction *does* matter is the **filter bank**: 4 sub-bands × 21 = 84
+features against 116 windows is 1.4 samples per feature, and it shows the
+widest 5-fold/LORO gap in the whole table — 84.0% down to 41.1%. That 43-point
+spread is what overfitting looks like. If you use a filter bank, you need the
+reduction; the better answer is to not need the filter bank.
+
+The number to watch is **samples per feature**: 5.5 single-band, 1.4 filter
+bank. Both are low, and the fix is more calibration data, not fewer features.
+
+### Riemannian does not fix the confound — it sharpens it
+
+| | 6 channels | 8 channels (Ch2/Ch3 kept) |
+| --- | --- | --- |
+| predict recording host | **100.0%** | 99.1% |
+| rest vs imagery | **100.0%** | 99.1% |
+
+Riemannian features separate the two laptops *perfectly*, better than band
+power's 95.7%. That makes sense — covariance structure is precisely what
+changes when electrode impedance and montage change between sessions. It is
+more session-sensitive, not less.
+
+### The 8-channel result is a clock, not a brain
+
+Keeping the artifact channels lifts hands vs legs to 73.6%, which looks like a
+win until you break it down by recording:
+
+| recording | label | t_start | LORO accuracy |
+| --- | --- | --- | --- |
+| Hands3 | hands | 195s | 100% |
+| Hands2 | hands | 305s | 88% |
+| Hands1 | hands | 415s | 86% |
+| LegImagery5 | legs | 487s | **0%** |
+| LegImagery4 | legs | 655s | 100% |
+| LegImagery3 | legs | 930s | 100% |
+| Legimagery2 | legs | 1018s | 89% |
+| LegImagery1 | legs | 1082s | 100% |
+| Hands5 | hands | 1161s | **0%** |
+
+Hands was recorded early in the session, legs late. The two recordings that
+break that ordering — the earliest legs trial and the one late hands trial —
+are *exactly* the two that score 0%. The classifier learned recording time via
+drift in the artifact channels. Use the 6-channel configuration.
+
+### Using it
+
+```bash
+python3 compare_riemann.py                              # the table above
+python3 train_offline.py --riemann --save model.pkl     # train and persist
+python3 realtime_classifier.py --model model.pkl        # live, unchanged
+```
+
+The saved model records `feature_mode="riemann"`, and the live loop hands the
+pipeline raw epochs instead of band-power vectors. Both paths are tested
+end-to-end.
+
+### Verdict
+
+Keep Riemannian TS + SVM-RBF as the pipeline — it's the right choice for real
+data and costs nothing to keep. Skip PCA at 21 features. Revisit reduction only
+if you go to a filter bank or add channels. On *this* dataset every variant is
+at or below chance, which is a fact about the data, not the method.
+
+## Why two columns
 
 Random k-fold is what `class_exampl.ipynb` does via `train_test_split`. Windows
 overlap by 50%, so near-identical windows land on both sides of the split and
@@ -78,13 +193,13 @@ that predicts live performance. **Always read the right-hand column.**
 ## On the day
 
 ```bash
-pip install numpy scipy scikit-learn pylsl
+pip install numpy scipy scikit-learn pyriemann pylsl
 
 # 1. Record calibration data — interleaved classes, one subject, one sitting
 python3 record_calibration.py --subject alice --classes rest,hands --trials 40
 
 # 2. Train and check the leave-one-recording-out score
-python3 train_offline.py --data-dir calibration/alice --save
+python3 train_offline.py --data-dir calibration/alice --riemann --save
 
 # 3. Drive the game
 python3 realtime_classifier.py --output lsl --flap-class hands

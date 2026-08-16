@@ -112,6 +112,9 @@ def main():
                         help="directory of CSVs (default: the supplied dataset)")
     parser.add_argument("--save", nargs="?", const="model.pkl", default=None,
                         help="fit on all data and save to this path (default model.pkl)")
+    parser.add_argument("--riemann", action="store_true",
+                        help="save a Riemannian tangent-space + SVM-RBF model "
+                             "instead of band power + LDA")
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir) if args.data_dir else DATA_DIR
@@ -149,11 +152,24 @@ def main():
 
     if args.save:
         rec = recordings[0]
-        model = train(
-            X, y, fs=rec.fs, window_s=args.window,
-            n_channels=len(rec.channels), channels=rec.channels,
-            notes=f"trained on {data_dir}",
-        )
+        if args.riemann:
+            from bci.riemann import epochs_from_recordings, riemann_svm
+
+            # The Riemannian pipeline consumes raw epochs, not band-power
+            # vectors, so rebuild the dataset in that shape.
+            Xr, yr, _ = epochs_from_recordings(recordings, args.window, args.overlap)
+            model = train(
+                Xr, yr, fs=rec.fs, window_s=args.window,
+                n_channels=len(rec.channels), channels=rec.channels,
+                clf=riemann_svm(fs=rec.fs), feature_mode="riemann",
+                notes=f"Riemannian TS + SVM-RBF, trained on {data_dir}",
+            )
+        else:
+            model = train(
+                X, y, fs=rec.fs, window_s=args.window,
+                n_channels=len(rec.channels), channels=rec.channels,
+                notes=f"trained on {data_dir}",
+            )
         path = model.save(args.save)
         print(f"\nSaved model to {path}")
         print(f"Run it live:  python3 realtime_classifier.py --model {path}")

@@ -158,8 +158,14 @@ def main():
                       f"{model.n_channels}. Use --channels to select.")
                 break
 
-            clean = preprocess(window, model.fs)
-            features = log_band_power(clean, model.fs).reshape(1, -1)
+            if getattr(model, "feature_mode", "bandpower") == "riemann":
+                # The Riemannian pipeline filters, builds the covariance and
+                # projects to the tangent space itself, so it wants the raw
+                # epoch with a leading batch axis.
+                features = window[np.newaxis, :, :]
+            else:
+                clean = preprocess(window, model.fs)
+                features = log_band_power(clean, model.fs).reshape(1, -1)
             prediction = model.pipeline.predict(features)[0]
             votes.append(prediction)
 
