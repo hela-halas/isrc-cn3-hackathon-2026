@@ -3,3 +3,14 @@ Flappy Brain/
 *.exe
 *.dll
 *_Data/
+
+# Trained model artifacts
+model.pkl
+*.pkl
+
+# Recorded calibration data
+calibration/
+
+# Python
+__pycache__/
+*.pyc
