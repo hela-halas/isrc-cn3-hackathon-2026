@@ -3,3 +3,10 @@ Flappy Brain/
 *.exe
 *.dll
 *_Data/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Trained model — regenerate with `python train_classifier.py train`
+model.pkl
