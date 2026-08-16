@@ -3,3 +3,10 @@ Flappy Brain/
 *.exe
 *.dll
 *_Data/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Saved models
+*.joblib
