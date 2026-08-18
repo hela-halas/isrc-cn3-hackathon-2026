@@ -120,7 +120,7 @@ def get_trained_classifier(fs: float, window_sec: float, channels: np.ndarray, n
         
         raw_data = load_eeg_csv(filename)
         raw_data = raw_data[channels, :]
-        clean_data = apply_bandpass_dilter(raw_data, fs, lowcut = 1.0, highcut = 50.0)
+        clean_data = apply_bandpass_filter(raw_data, fs, lowcut = 1.0, highcut = 50.0)
         
         total_samples = clean_data.shape[1]
         for start_idx in range(0, total_samples - window_samples + 1, step_samples):
