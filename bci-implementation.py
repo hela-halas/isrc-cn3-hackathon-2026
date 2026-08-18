@@ -227,7 +227,7 @@ def grab(args):
     
     STREAM_NAME = "MotorImagery"
     STREAM_TYPE = "Markers"
-    CHANNEL_COUNT = 3
+    CHANNEL_COUNT = 1
     SAMPLE_RATE = 0 # irregular rate - we push samples manually, not on a clock
     info = StreamInfo(STREAM_NAME, STREAM_TYPE, CHANNEL_COUNT, SAMPLE_RATE, "float32", "eeg-classifier-001")
     outlet = StreamOutlet(info)
@@ -288,7 +288,7 @@ def build_parser():
 
     grab_cmd = sub.add_parser("grab", parents=[common], help="pull one window of raw samples")
     grab_cmd.add_argument("--sampling-rate", type=float)
-    grab_cmd.add_argument("--channels", help="zero-based indices, e.g. 0,1,2,3,4,5,6,7")
+    grab_cmd.add_argument("--channels", default = "2,3,4", help="zero-based indices, e.g. 0,1,2,3,4,5,6,7")
     grab_cmd.add_argument("--seconds", type=float, default=1.0)
     grab_cmd.add_argument(
         "--no-plot", action="store_true", help="skip the sanity-check plot of the raw epoch"
